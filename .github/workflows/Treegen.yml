@@ -1,0 +1,85 @@
+name: TWRP Tree Generator
+
+on:
+  workflow_dispatch:
+    inputs:
+      USER_NAME:
+        description: 'Your GitHub Username'
+        required: true
+      USER_EMAIL:
+        description: 'Your GitHub Email'
+        required: true
+      FIRMWARE_URL:
+        description: 'Stock ROM Download Link'
+        required: true
+
+jobs:
+  generate_twrp_tree:
+    name: Generate TWRP Device Tree
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GTOKEN }}
+      FUR: ${{ github.event.inputs.FIRMWARE_URL }}
+      UN: ${{ github.event.inputs.USER_NAME }}
+      UEM: ${{ github.event.inputs.USER_EMAIL }}
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: |
+        sudo apt update && sudo apt install -y \
+          cpio aria2 git python3-pip unzip \
+          build-essential python3 python3-setuptools \
+          gh
+        pip3 install twrpdtgen
+
+    - name: Download and Extract Firmware
+      run: |
+        mkdir -p ~/rom
+        cd ~/rom
+        aria2c -x16 -s16 "${{ env.FUR }}" -o firmware.zip
+        unzip -o firmware.zip -d extracted
+
+    - name: Generate TWRP Device Tree
+      run: |
+        cd ~/rom
+        mkdir twrp-tree
+        twrpdtgen extracted --output twrp-tree || true
+
+    - name: Set up Git for Upload
+      run: |
+        git config --global user.name "${{ env.UN }}"
+        git config --global user.email "${{ env.UEM }}"
+        gh auth login --with-token <<< "${{ secrets.GTOKEN }}"
+
+    - name: Extract Codename & Brand
+      run: |
+        prop_file=$(find ~/rom/extracted -name build.prop | head -n1)
+        codename=$(grep -m1 "ro.product.device=" "$prop_file" | cut -d= -f2)
+        brand=$(grep -m1 "ro.product.brand=" "$prop_file" | cut -d= -f2 | tr 'A-Z' 'a-z')
+        echo "$codename" > ~/codename.txt
+        echo "$brand" > ~/brand.txt
+
+    - name: Upload TWRP Tree to GitHub
+      run: |
+        cd ~/rom/twrp-tree
+        codename=$(cat ~/codename.txt)
+        brand=$(cat ~/brand.txt)
+        dat=$(date +%Y%m%d)
+        git init
+        git branch -M twrp-"$codename"-"$dat"
+        git add .
+        git commit -s -m "$codename : TWRP device tree"
+        gh repo create twrp_device_"$brand"_"$codename" --public \
+          --description="TWRP device tree for $codename" \
+          --source=. --remote=origin --push
+
+    - name: Upload TWRP Tree as Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: TWRP_Device_Tree
+        path: ~/rom/twrp-tree
