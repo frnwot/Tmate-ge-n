@@ -1,0 +1,124 @@
+name: OrangeFox Recovery Build
+
+# Developer: Farhan
+# Contact: ffjisan804@gmail.com
+# Description: OrangeFox Recovery build workflow with Artix colors logo and developer info
+
+on:
+  workflow_dispatch:
+    inputs:
+      MANIFEST_BRANCH:
+        type: choice
+        description: OrangeFox manifest branch
+        options:
+          - 12.1
+          - 11
+          - 14.1
+        required: true
+        default: 12.1
+      DEVICE_TREE_URL:
+        description: Device tree repository URL
+        required: true
+        default: https://github.com/OrangeFoxRecovery/device_xiaomi_lavender
+      DEVICE_TREE_BRANCH:
+        description: Device tree branch
+        required: true
+        default: fox_12.1
+      DEVICE_PATH:
+        description: Path to device tree (e.g. device/xiaomi/lavender)
+        required: true
+        default: device/xiaomi/lavender
+      DEVICE_NAME:
+        description: Codename (used in lunch command, ex: lavender)
+        required: true
+        default: lavender
+      BUILD_TARGET:
+        type: choice
+        description: Image to build
+        options:
+          - recovery
+          - boot
+          - vendor_boot
+        default: recovery
+      OPTIONAL_FLAGS:
+        description: Additional export or build flags (optional)
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-core gnupg flex bison \
+            build-essential zip curl zlib1g-dev gcc-multilib g++-multilib \
+            libc6-dev-i386 lib32ncurses5-dev lib32z1-dev libgl1-mesa-dev \
+            libxml2-utils xsltproc unzip bc python2 libssl-dev libncurses5
+
+      - name: Show Artix Logo and Developer Info
+        run: |
+          GREEN='\033[0;32m'
+          BLUE='\033[0;34m'
+          NC='\033[0m' # No Color
+          echo -e "${GREEN}    ___            _   _  __${NC}"
+          echo -e "${GREEN}   /   |  ____  __| | / |/ /${NC}"
+          echo -e "${BLUE}  / /| | / __ \/ _\` |/    / ${NC}"
+          echo -e "${BLUE} / ___ |/ / / / (_| / /|  | ${NC}"
+          echo -e "${GREEN}/_/  |_/_/ /_/\__,_/_/ |_| ${NC}"
+          echo -e "${NC}"
+          echo "OrangeFox Recovery Build"
+          echo "Developer: Farhan"
+          echo "Contact: ffjisan804@gmail.com"
+          echo ""
+
+      - name: Clone OrangeFox Manifest and Initialize Repo
+        run: |
+          mkdir -p ~/ofox && cd ~/ofox
+          git clone https://gitlab.com/OrangeFox/sync.git
+          cd sync
+          ./orangefox_sync.sh --branch "${{ inputs.MANIFEST_BRANCH }}" --path "$HOME/fox"
+
+      - name: Setup Local Manifest
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir -p fox/.repo/local_manifests
+          cat > fox/.repo/local_manifests/roomservice.xml <<EOF
+          <manifest>
+            <project name="${{ inputs.DEVICE_TREE_URL }}" path="${{ inputs.DEVICE_PATH }}" remote="origin" revision="${{ inputs.DEVICE_TREE_BRANCH }}" />
+          </manifest>
+          EOF
+
+      - name: Sync Repo
+        run: |
+          cd ~/fox
+          repo init -u https://gitlab.com/OrangeFox/manifest.git -b ${{ inputs.MANIFEST_BRANCH }} --depth=1
+          repo sync -j$(nproc) --force-sync
+
+      - name: Start Build
+        run: |
+          cd ~/fox
+          source build/envsetup.sh
+
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export LC_ALL=C
+          export FOX_BUILD_DEVICE=${{ inputs.DEVICE_NAME }}
+
+          if [ -n "${{ inputs.OPTIONAL_FLAGS }}" ]; then
+            eval "${{ inputs.OPTIONAL_FLAGS }}"
+          fi
+
+          lunch twrp_${{ inputs.DEVICE_NAME }}-eng
+          mka $(echo "${{ inputs.BUILD_TARGET }}" | tr -d _)image
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrangeFox-${{ inputs.DEVICE_NAME }}
+          path: |
+            ~/fox/out/target/product/${{ inputs.DEVICE_NAME }}/*.img
+            
