@@ -1,4 +1,13 @@
-name: OrangeFox Recovery Build
+name: OrangeFox - Build for mi439
+
+# Maintainer: jisan ff
+# Email: ffjisan804@gmail.com
+# Device: Xiaomi mi439
+# Based on OrangeFox recovery build system
+# Workflow builds OrangeFox recovery using latest branches and libraries
+# Uses Ubuntu 22.04 runner, sets swap space, installs dependencies and repo tool
+# Author: jisan ff (ffjisan804@gmail.com)
+# Credits to TeamWin, OrangeFox project & azwhikaru for templates
 
 on:
   workflow_dispatch:
@@ -6,112 +15,151 @@ on:
       MANIFEST_BRANCH:
         description: 'OrangeFox Manifest Branch'
         required: true
-        default: '12.1'
-      DEVICE_TREE_URL:
-        description: 'Device Tree Git Repository URL'
+        default: '14.1'
+        type: choice
+        options:
+          - 14.1
+          - 12.1
+          - 11.0
+      DEVICE_TREE:
+        description: 'OrangeFox Device Tree Git URL'
         required: true
-        default: 'https://github.com/OrangeFoxRecovery/device_xiaomi_lavender'
+        default: 'https://github.com/OrangeFox/device_mi439'
       DEVICE_TREE_BRANCH:
-        description: 'Device Tree Branch'
+        description: 'OrangeFox Device Tree Branch'
         required: true
-        default: 'fox_12.1'
+        default: 'fox_14.1'
       DEVICE_PATH:
-        description: 'Device Tree Path (e.g., device/xiaomi/lavender)'
+        description: 'Device Path inside source tree'
         required: true
-        default: 'device/xiaomi/lavender'
+        default: 'device/xiaomi/mi439'
       DEVICE_NAME:
-        description: 'Device Codename (used in lunch command)'
+        description: 'Device Codename'
         required: true
-        default: 'lavender'
+        default: 'mi439'
       BUILD_TARGET:
-        description: 'Build target (recovery/boot/vendor_boot)'
+        description: 'Build target image'
         required: true
         default: 'recovery'
-      OPTIONAL_FLAGS:
-        description: 'Optional build flags or environment variables'
-        required: false
+        type: choice
+        options:
+          - boot
+          - recovery
+          - vendorboot
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    name: Build OrangeFox by ${{ github.actor }}
+    runs-on: ubuntu-22.04
     env:
-      TZ: Asia/Dhaka
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DEVELOPER: "jisan ff"
+      EMAIL: "ffjisan804@gmail.com"
+    permissions:
+      contents: write
 
     steps:
-      - name: Free disk space (cleanup)
+      - name: Print Banner
         run: |
-          wget https://raw.githubusercontent.com/KanariaAlt/Android-CI/main/Common/free_disk_space.sh
-          bash free_disk_space.sh
-
-      - name: Setup Swap Space
-        uses: pierotofy/set-swap-space@master
-        with:
-          swap-size-gb: 12
-
-      - name: Install Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev \
-            gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev lib32z1-dev libgl1-mesa-dev \
-            libxml2-utils xsltproc unzip bc python2 libssl-dev libncurses5 repo
-
-      - name: Show Artix Logo and Developer Info
-        run: |
-          GREEN='\033[0;32m'
-          BLUE='\033[0;34m'
-          NC='\033[0m'
-          echo -e "${GREEN}    ___            _   _  __${NC}"
-          echo -e "${GREEN}   /   |  ____  __| | / |/ /${NC}"
-          echo -e "${BLUE}  / /| | / __ \/ _\` |/    / ${NC}"
-          echo -e "${BLUE} / ___ |/ / / / (_| / /|  | ${NC}"
-          echo -e "${GREEN}/_/  |_/_/ /_/\__,_/_/ |_| ${NC}"
-          echo -e "${NC}"
-          echo "OrangeFox Recovery Build"
-          echo "Developer: Farhan"
-          echo "Contact: ffjisan804@gmail.com"
+          echo -e "\033[1;36m"
+          echo "██████╗ ██████╗  ██████╗ ███████╗██╗  ██╗"
+          echo "██╔══██╗██╔══██╗██╔═══██╗██╔════╝██║ ██╔╝"
+          echo "██████╔╝██████╔╝██║   ██║█████╗  █████╔╝ "
+          echo "██╔═══╝ ██╔══██╗██║   ██║██╔══╝  ██╔═██╗ "
+          echo "██║     ██║  ██║╚██████╔╝███████╗██║  ██╗"
+          echo "╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝"
+          echo -e "\033[0m"
+          echo -e "\033[1;33mOrangeFox Recovery Build Workflow\033[0m"
+          echo -e "\033[1;32mMaintainer:\033[0m $DEVELOPER"
+          echo -e "\033[1;32mEmail:\033[0m $EMAIL"
+          echo -e "\033[1;34mDevice:\033[0m ${{ github.event.inputs.DEVICE_NAME }}"
           echo ""
 
-      - name: Initialize repo
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/fox
-          cd $GITHUB_WORKSPACE/fox
-          repo init -u https://gitlab.com/OrangeFox/manifest.git -b ${{ inputs.MANIFEST_BRANCH }} --depth=1
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-      - name: Create local manifest for device tree
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/fox/.repo/local_manifests
-          cat > $GITHUB_WORKSPACE/fox/.repo/local_manifests/roomservice.xml <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<manifest>
-  <remote name="origin" fetch="https://$(echo ${{ inputs.DEVICE_TREE_URL }} | awk -F/ '{print $3}')"/>
-  <project name="$(basename ${{ inputs.DEVICE_TREE_URL }})" path="${{ inputs.DEVICE_PATH }}" remote="origin" revision="${{ inputs.DEVICE_TREE_BRANCH }}"/>
-</manifest>
-EOF
+      - name: Clean-up workspace
+        uses: rokibhasansagar/slimhub_actions@main
 
-      - name: Sync repo
+      - name: Set swap space (24GB)
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 24
+
+      - name: Install dependencies and repo tool
         run: |
-          cd $GITHUB_WORKSPACE/fox
-          repo sync -j$(nproc) --force-sync
+          echo -e "\033[1;33mInstalling dependencies...\033[0m"
+          sudo apt-get update
+          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses6 lib32z1 libgl1-mesa-dev libxml2-utils xsltproc unzip bc python2 openjdk-17-jdk-headless aria2
+          echo -e "\033[1;32mInstalling repo tool...\033[0m"
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo 'export PATH=~/bin:$PATH' >> $GITHUB_ENV
+          source $GITHUB_ENV
+
+      - name: Setup Build Environment
+        run: |
+          echo -e "\033[1;33mSetting up build environment...\033[0m"
+          git clone https://gitlab.com/OrangeFox/misc/scripts.git -b master
+          cd scripts
+          sudo bash setup/android_build_env.sh
+
+      - name: Sync OrangeFox Manifest
+        if: inputs.MANIFEST_BRANCH == '11.0' || inputs.MANIFEST_BRANCH == '12.1' || inputs.MANIFEST_BRANCH == '14.1'
+        run: |
+          echo -e "\033[1;33mSyncing OrangeFox manifest branch ${{ inputs.MANIFEST_BRANCH }}...\033[0m"
+          mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
+          cd ${GITHUB_WORKSPACE}/OrangeFox
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          git clone https://gitlab.com/OrangeFox/sync.git -b master
+          cd sync
+          ./orangefox_sync.sh --branch ${{ inputs.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}
+
+      - name: Clone Device Tree
+        run: |
+          echo -e "\033[1;33mCloning device tree...\033[0m"
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}
+          git clone ${{ inputs.DEVICE_TREE }} -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ inputs.DEVICE_PATH }}
+          cd ${{ inputs.DEVICE_PATH }}
+          echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
       - name: Build OrangeFox Recovery
         run: |
-          cd $GITHUB_WORKSPACE/fox
+          echo -e "\033[1;33mStarting build for ${{ inputs.DEVICE_NAME }}...\033[0m"
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}
+          set +e
           source build/envsetup.sh
-
+          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
           export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL=C
-          export FOX_BUILD_DEVICE=${{ inputs.DEVICE_NAME }}
-
-          if [ -n "${{ inputs.OPTIONAL_FLAGS }}" ]; then
-            echo "Applying optional flags"
-            eval "${{ inputs.OPTIONAL_FLAGS }}"
-          fi
-
+          set -e
           lunch twrp_${{ inputs.DEVICE_NAME }}-eng
-          mka $(echo "${{ inputs.BUILD_TARGET }}" | tr -d _)image -j$(nproc)
+          make clean
+          mka adbd ${{ inputs.BUILD_TARGET }}image
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
+      - name: Set Release Properties
+        run: |
+          echo "BUILD_DATE=$(TZ=Asia/Manila date +%Y%m%d)" >> $GITHUB_ENV
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}
+          DEVICE_TREE_URL="${{ inputs.DEVICE_TREE }}"
+          if [[ "${DEVICE_TREE_URL}" == *.git ]]; then
+            DEVICE_TREE_URL="${DEVICE_TREE_URL%.git}"
+          fi
+          echo "DEVICE_TREE_URL=${DEVICE_TREE_URL}" >> $GITHUB_ENV
+
+      - name: Upload OrangeFox Build Artifacts
+        uses: softprops/action-gh-release@v2
         with:
-          name: OrangeFox-${{ inputs.DEVICE_NAME }}-${{ github.run_id }}
-          path: $GITHUB_WORKSPACE/fox/out/target/product/${{ inputs.DEVICE_NAME }}/*.img
+          files: |
+            OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}/out/target/product/${{ inputs.DEVICE_NAME }}/OrangeFox*.img
+            OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}/out/target/product/${{ inputs.DEVICE_NAME }}/OrangeFox*.zip
+          name: OrangeFox Recovery for ${{ inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
+          tag_name: ${{ github.run_id }}
+          body: |
+            ## OrangeFox Recovery Build - Unofficial
+            Build: fox_${{ inputs.MANIFEST_BRANCH }}
+            Device: [Device Tree/Branch](${{ env.DEVICE_TREE_URL }}/tree/${{ inputs.DEVICE_TREE_BRANCH }})
+            Commit: Most recent [commit](${{ env.DEVICE_TREE_URL }}/commit/${{ env.COMMIT_ID }})
+            Built by $DEVELOPER
+            Contact: $EMAIL
