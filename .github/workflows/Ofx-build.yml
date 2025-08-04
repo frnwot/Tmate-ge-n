@@ -1,70 +1,65 @@
 name: OrangeFox Recovery Build
 
-# Developer: Farhan
-# Contact: ffjisan804@gmail.com
-# Description: OrangeFox Recovery build workflow with Artix colors logo and developer info
-
 on:
   workflow_dispatch:
     inputs:
       MANIFEST_BRANCH:
-        type: choice
-        description: OrangeFox manifest branch
-        options:
-          - 12.1
-          - 11
-          - 14.1
+        description: 'OrangeFox Manifest Branch'
         required: true
-        default: 12.1
+        default: '12.1'
       DEVICE_TREE_URL:
-        description: Device tree repository URL
+        description: 'Device Tree Git Repository URL'
         required: true
-        default: https://github.com/OrangeFoxRecovery/device_xiaomi_lavender
+        default: 'https://github.com/OrangeFoxRecovery/device_xiaomi_lavender'
       DEVICE_TREE_BRANCH:
-        description: Device tree branch
+        description: 'Device Tree Branch'
         required: true
-        default: fox_12.1
+        default: 'fox_12.1'
       DEVICE_PATH:
-        description: Path to device tree (e.g. device/xiaomi/lavender)
+        description: 'Device Tree Path (e.g., device/xiaomi/lavender)'
         required: true
-        default: device/xiaomi/lavender
+        default: 'device/xiaomi/lavender'
       DEVICE_NAME:
-        description: Codename (used in lunch command, ex: lavender)
+        description: 'Device Codename (used in lunch command)'
         required: true
-        default: lavender
+        default: 'lavender'
       BUILD_TARGET:
-        type: choice
-        description: Image to build
-        options:
-          - recovery
-          - boot
-          - vendor_boot
-        default: recovery
+        description: 'Build target (recovery/boot/vendor_boot)'
+        required: true
+        default: 'recovery'
       OPTIONAL_FLAGS:
-        description: Additional export or build flags (optional)
+        description: 'Optional build flags or environment variables'
         required: false
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
+    env:
+      TZ: Asia/Dhaka
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Free disk space (cleanup)
+        run: |
+          wget https://raw.githubusercontent.com/KanariaAlt/Android-CI/main/Common/free_disk_space.sh
+          bash free_disk_space.sh
+
+      - name: Setup Swap Space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
 
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git-core gnupg flex bison \
-            build-essential zip curl zlib1g-dev gcc-multilib g++-multilib \
-            libc6-dev-i386 lib32ncurses5-dev lib32z1-dev libgl1-mesa-dev \
-            libxml2-utils xsltproc unzip bc python2 libssl-dev libncurses5
+          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev \
+            gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev lib32z1-dev libgl1-mesa-dev \
+            libxml2-utils xsltproc unzip bc python2 libssl-dev libncurses5 repo
 
       - name: Show Artix Logo and Developer Info
         run: |
           GREEN='\033[0;32m'
           BLUE='\033[0;34m'
-          NC='\033[0m' # No Color
+          NC='\033[0m'
           echo -e "${GREEN}    ___            _   _  __${NC}"
           echo -e "${GREEN}   /   |  ____  __| | / |/ /${NC}"
           echo -e "${BLUE}  / /| | / __ \/ _\` |/    / ${NC}"
@@ -76,32 +71,31 @@ jobs:
           echo "Contact: ffjisan804@gmail.com"
           echo ""
 
-      - name: Clone OrangeFox Manifest and Initialize Repo
+      - name: Initialize repo
         run: |
-          mkdir -p ~/ofox && cd ~/ofox
-          git clone https://gitlab.com/OrangeFox/sync.git
-          cd sync
-          ./orangefox_sync.sh --branch "${{ inputs.MANIFEST_BRANCH }}" --path "$HOME/fox"
-
-      - name: Setup Local Manifest
-        working-directory: ${{ runner.temp }}
-        run: |
-          mkdir -p fox/.repo/local_manifests
-          cat > fox/.repo/local_manifests/roomservice.xml <<EOF
-          <manifest>
-            <project name="${{ inputs.DEVICE_TREE_URL }}" path="${{ inputs.DEVICE_PATH }}" remote="origin" revision="${{ inputs.DEVICE_TREE_BRANCH }}" />
-          </manifest>
-          EOF
-
-      - name: Sync Repo
-        run: |
-          cd ~/fox
+          mkdir -p $GITHUB_WORKSPACE/fox
+          cd $GITHUB_WORKSPACE/fox
           repo init -u https://gitlab.com/OrangeFox/manifest.git -b ${{ inputs.MANIFEST_BRANCH }} --depth=1
+
+      - name: Create local manifest for device tree
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/fox/.repo/local_manifests
+          cat > $GITHUB_WORKSPACE/fox/.repo/local_manifests/roomservice.xml <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote name="origin" fetch="https://$(echo ${{ inputs.DEVICE_TREE_URL }} | awk -F/ '{print $3}')"/>
+  <project name="$(basename ${{ inputs.DEVICE_TREE_URL }})" path="${{ inputs.DEVICE_PATH }}" remote="origin" revision="${{ inputs.DEVICE_TREE_BRANCH }}"/>
+</manifest>
+EOF
+
+      - name: Sync repo
+        run: |
+          cd $GITHUB_WORKSPACE/fox
           repo sync -j$(nproc) --force-sync
 
-      - name: Start Build
+      - name: Build OrangeFox Recovery
         run: |
-          cd ~/fox
+          cd $GITHUB_WORKSPACE/fox
           source build/envsetup.sh
 
           export ALLOW_MISSING_DEPENDENCIES=true
@@ -109,16 +103,15 @@ jobs:
           export FOX_BUILD_DEVICE=${{ inputs.DEVICE_NAME }}
 
           if [ -n "${{ inputs.OPTIONAL_FLAGS }}" ]; then
+            echo "Applying optional flags"
             eval "${{ inputs.OPTIONAL_FLAGS }}"
           fi
 
           lunch twrp_${{ inputs.DEVICE_NAME }}-eng
-          mka $(echo "${{ inputs.BUILD_TARGET }}" | tr -d _)image
+          mka $(echo "${{ inputs.BUILD_TARGET }}" | tr -d _)image -j$(nproc)
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
         with:
-          name: OrangeFox-${{ inputs.DEVICE_NAME }}
-          path: |
-            ~/fox/out/target/product/${{ inputs.DEVICE_NAME }}/*.img
-            
+          name: OrangeFox-${{ inputs.DEVICE_NAME }}-${{ github.run_id }}
+          path: $GITHUB_WORKSPACE/fox/out/target/product/${{ inputs.DEVICE_NAME }}/*.img
