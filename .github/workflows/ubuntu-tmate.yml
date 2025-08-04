@@ -1,0 +1,35 @@
+# simple script to generate ssh
+name: Ubuntu tmate session
+
+on:
+  workflow_dispatch:
+
+jobs:
+  tmate-session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 720
+
+    steps:
+      - name: Install tmate and ssh
+        run: |
+          sudo apt update
+          sudo apt install -y tmate openssh-client
+
+      - name: Generate SSH keys
+        run: |
+          ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
+
+      - name: Start tmate session
+        run: |
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+
+      - name: Show tmate connection info
+        run: |
+          echo "SSH connection:"
+          tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
+          echo "Web terminal (for browser):"
+          tmate -S /tmp/tmate.sock display -p '#{tmate_web}'
+          echo "Session will remain active for 12 hours."
+          sleep 43200
+          
